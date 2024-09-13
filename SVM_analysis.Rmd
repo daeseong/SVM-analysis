@@ -1,0 +1,239 @@
+---
+title: 'Homework #1'
+author: "dk6501"
+date: "2024-08-21"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+
+#### **Question 2.1**
+**Describe a situation or problem from your job, everyday life, current events, etc., for which a classification model would be appropriate. List some (up to 5) predictors that you might use.**
+
+An example where a classification model would be appropriate for an everyday task could be deciding which eating utensil I should use for the type of food I’m about to eat. Some predictors could be:
+
+1. Food type (soup, salad, pasta)
+2. Consistency (liquid, solid, mushy)
+3. Temperature
+4. Serving medium (bowl, plate, wrap, bag, baking dish)
+5. Dish region (Asia, Middle-East, Latin-America)
+
+The output classes could be hand, spoon, fork, spork, chopstick, knife.
+
+<br>
+
+#### **Questions 2.2.1 - 2.2.2**
+
+**1. Using the support vector machine function ksvm contained in the R package kernlab, find a good classifier for this data. Show the equation of your classifier, and how well it classifies the data points in the full data set.  (Don’t worry about test/validation data yet; we’ll cover that topic soon.)**
+
+The equation of an SVM classifier is in the form (Module2_L4.pdf, pg. 5):
+$$
+a_1x_1 + ... + a_nx_n + a_0 = 0
+$$
+Where n is the number of attributes or dimensions.
+
+For our data, we will be using ksvm, with the Vanilladot kernal.
+```{r init, message=FALSE}
+library(kernlab)
+library(ggplot2)
+df <- read.table("credit_card_data.txt")
+```
+
+
+```{r model}
+set.seed(7)
+
+# The following code is taken from the HW1 package, question 2.2.docx
+
+model <- ksvm(as.matrix(df[,1:10]), 
+              as.factor(df[,11]), 
+              type="C-svc", 
+              kernel="vanilladot", 
+              C=100, 
+              scaled=TRUE)
+```
+
+Our scaled coefficients \(a_0 - a_m\) is given by:
+```{r coef}
+# Calculate coefficients a1, ..., am
+a <- colSums(model@xmatrix[[1]] * model@coef[[1]])
+a
+
+# Calculate coefficient a0
+a0 <- -model@b
+a0
+```
+
+So the equation for our SVM classifier is given as: \(a^Tx + a_0 = 0\). Where the vector \(a\) contains the values of `V1` to `V10`.
+
+The coefficients \(a_1 - a_m\) represent the importance of that attribute. In this case, we see that `V5` has the greatest magnitude, meaning it has the most influence in our model. In addition, we observe that some attributes are negative. In SVM, the response for data point i is given as \(y_i \geq 1\) if it's above (blue points) and \(y_i \leq -1\) if it's below (red points) (Module2_L4.pdf, pg. 5). Therefore, a negative coefficient means that this particular input variable x (predictor, feature, etc.) influences the "red" side, where as positive coefficients such as `V5` influences more towards the "blue" side.
+
+In the case for \(a_0\), this is the bias term. For a data point to be considered positive ("blue"), the sum of the weighted terms need to be greater than this to be classified above the decision boundary, since \(y_i \geq 1\).
+
+<br>
+
+Now to determine how well our model classifies the data points, we need to run the data through our model. Then we will compare the predicted output of our model vs. the actual observation.
+
+```{r predict_acc}
+# Use model to predict output
+pred <- predict(model, df[,1:10])
+
+# Compare model output prediction with actual, find percentage.
+sum(pred == df[,11]) / nrow(df)
+```
+
+We observe that our model's accuracy (correctly classified) is around 86.4%. We can try to improve accuracy by adjusting the hyperparameter C. C determines the margin of the hyperplane for SVMs, where lower the C, the wider the margin. (Shivers, M 2023) What is the influence of C in SVMs with linear kernel? [(StackExchange)](https://stats.stackexchange.com/q/31067If) C is extremely low, we expect accuracy to decrease, since the margins are wider, it will likely misclassify the input; the model prioritizes wider support vectors, so anything near or inside the classifier might be misclassified. Similarly, with a high C, we can expect accuracy to also decrease. If we look at an extreme case where there is no margin, small variations in the input will greatly effect where that input is classified. (9.2.1 ISLR)
+
+
+```{r tuning, message=FALSE, result="hide"}
+
+C_tests = 10^seq(-7, 7, length.out=15)
+accuracy_tests = length(C_tests)
+for (i in seq_along(C_tests)) {
+  
+  model <- ksvm(as.matrix(df[,1:10]), 
+                as.factor(df[,11]), 
+                type="C-svc", 
+                kernel="vanilladot", 
+                C=C_tests[i], 
+                scaled=TRUE)
+  
+  pred <- predict(model, df[,1:10])
+  accuracy_tests[i] <- sum(pred == df[,11]) / nrow(df)
+  print(C_tests[i])
+  print(accuracy_tests[i])
+  
+  
+}
+```
+
+```{r testplot}
+
+# Claude Sonnet 3.5 (2024) Fixing Axis Label
+
+C_plot <- data.frame(C_tests, accuracy_tests)
+ggplot(
+  C_plot,
+  aes(C_tests, accuracy_tests)
+  ) +
+  geom_point() +
+  scale_x_log10(breaks=C_tests) +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)
+  )
+```
+
+From the plot above, we can see that if `C` is extremely low, the accuracy drops. In this case, accuracy is about 55%. On the other hand, if `C` is too high, we also see that the accuracy decreases. We will test C-values between 0.01 and 10^5, since this we observe the highest accuracies in this region.
+
+```{r tuning2, message=FALSE, result="hide"}
+
+C_tests = 10^seq(-2, 5, length.out=20)
+accuracy_tests = length(C_tests)
+for (i in seq_along(C_tests)) {
+  
+  model <- ksvm(as.matrix(df[,1:10]), as.factor(df[,11]), type="C-svc", kernel="vanilladot", C=C_tests[i], scaled=TRUE)
+  pred <- predict(model, df[,1:10])
+  accuracy_tests[i] <- sum(pred == df[,11]) / nrow(df)
+  print(C_tests[i])
+  print(accuracy_tests[i])
+  
+  
+}
+
+```
+```{r tune2plot}
+C_plot <- data.frame(C_tests, accuracy_tests)
+ggplot(
+  C_plot,
+  aes(C_tests, accuracy_tests)
+  ) +
+  geom_point() +
+  scale_x_log10(breaks=C_tests) +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)
+  )
+```
+
+We see that when `C` is between 0.01 and 264, the accuracy is 86.39%. 
+
+**2. You are welcome, but not required, to try other (nonlinear) kernels as well; we’re not covering them in this course, but they can sometimes be useful and might provide better predictions than vanilladot.**
+
+Testing other some of the other kernals:
+```{r ktests}
+
+kernel_tests <- c("polydot", "besseldot", "tanhdot", "splinedot", "rbfdot", "anovadot")
+
+for (i in seq_along(kernel_tests)) {
+model <- ksvm(as.matrix(df[,1:10]), as.factor(df[,11]), type="C-svc", kernel=kernel_tests[[i]], C=100, scaled=TRUE)
+pred <- predict(model, df[,1:10])
+acc <- sum(pred == df[,11]) / nrow(df)
+
+print(kernel_tests[i])
+print(acc)
+
+}
+```
+With `C = 100` we observe the splinedot kernel has the highest accuracy. A nonlinear kernel such as splinedot could be used to create a more accurate model for this dataset.
+
+#### **Questions 2.2.3**
+
+**3. Using the k-nearest-neighbors classification function kknn contained in the R kknn package, suggest a good value of k, and show how well it classifies that data points in the full data set.  Don’t forget to scale the data (scale=TRUE in kknn).**
+```{r reset}
+rm(list=ls())
+library(ggplot2)
+library(kknn)
+df <- read.table("credit_card_data.txt")
+```
+
+
+```{r kknn model}
+
+# Rappaport (2024) Monday.8.26 Office Hours
+# Slide 9 From OH, Pseudocode
+
+k_test <- 1:25
+accuracies <- rep(0, 25)
+
+for (K in k_test) {
+  
+  pred <- rep(0, nrow(df))
+  
+  for (i in 1:nrow(df)) {
+  
+  model_knn <- kknn(V11~V1+V2+V3+V4+V5+V6+V7+V8+V9+V10,
+                    df[-i,],
+                    df[i,],
+                    k=K,
+                    distance=2,
+                    kernel="optimal",
+                    scale=TRUE
+                    )
+  
+  pred[i] <- round(fitted.values(model_knn))
+
+  }
+accuracies[K] <- sum(pred == df[,11]) / nrow(df)
+
+}
+
+acc_plot <- data.frame(K=k_test, accuracies=accuracies)
+ggplot(
+  acc_plot,
+  aes(K, accuracies)
+) +
+  geom_point()
+
+```
+
+
+```{r matrix}
+print(acc_plot)
+```
+From the `acc_plot` matrix, we observe the highest accuracy (0.8532) when k is 12 and 15. The plot shows a similar trend to Question 2.2.1. In this case, an extremely low k (or number of neighbors) or an extremely high k, will negatively affect the accuracy. When k is low, the decision boundary is too flexible, which is the same as a classifier with a low bias and high variance. This is also known as overfitting. Where a small change in the data, can create a large change in the response. On the other hand, when k is large, the decision boundary becomes less flexible. The result is similar to a high bias, low variance classifier. (2.2 ISLR pg. 41)
+
+Between `k = 10` and `k = 20` shows the best results.
+
+
+
