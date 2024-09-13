@@ -1,0 +1,347 @@
+---
+title: "HW2"
+author: "dk6501"
+date: "2024-09-03"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+#### **Question 3.1**
+**Using the same data set (credit_card_data.txt or credit_card_data-headers.txt) as in Question 2.2, use the `ksvm` or `kknn` function to find a good classifier:**
+**(a) using cross-validation (do this for the k-nearest-neighbors model; SVM is optional)**
+
+```{r init, message=FALSE}
+# Clear environment, initialize libraries, load data
+rm(list = ls())
+library(kernlab)
+library(ggplot2)
+library(kknn)
+df <- read.table("credit_card_data.txt")
+set.seed(7)
+```
+We will test 2 methods of cross-validation. The first will be "Leave-One-Out" cross-validation, and the other will be k-fold cross validation. 
+
+```{r LOOCV}
+# LOOCV
+kmax <- 25
+
+# Rappaport (2024) Monday 9.2 Office Hours
+model <- train.kknn(V11~.,df,kmax=kmax,scale=TRUE)
+
+accuracy <- rep(0, kmax)
+
+for (k in 1:kmax) {
+  
+  # HW1 Solutions - can also use round() but there is a slight difference 
+  # on how the rounding is done (see banker's rounding)
+  
+  pred <- as.integer(fitted(model)[[k]][1:nrow(df)] + 0.5)
+  accuracy[k] <- sum(pred == df$V11) / nrow(df)
+  
+}
+accuracy
+which.max(accuracy)
+max(accuracy)
+accuracy[15:17]
+
+acc_plot <- data.frame(K=1:kmax, accuracies=accuracy)
+ggplot(acc_plot, aes(K, accuracies)) +
+  geom_point()
+
+```
+
+Similar to HW#1, train.knn uses LOOCV. In this case, we train our knn model with the number of rows of our data - 1 (n - 1). And then use the remaining row, to validate our model `accuracy[k]`. We should also note that even though this shows our models accuracy, it does not necessarily show the quality of the model. To test for quality, we would have to run new data, or split the data from the start.
+
+Using LOOCV, we observe that the max accuracy is 0.853, when k = 12, 15, 16, 17. Additionally, accuracy seems to be the best when k is between 10 and 18, and anything outside of those values, we see a fall off in accuracy. 
+
+
+```{r kfold_CV}
+
+accuracy_cv <- rep(0, kmax)
+
+for (k in 1:kmax) {
+  
+  model_cv <- cv.kknn(V11~., df, kcv=10, k=k, scale=TRUE)
+  pred <- as.integer(model_cv[[1]][,2] + 0.5)
+  accuracy_cv[k] <- sum(pred == df$V11) / nrow(df)
+  
+}
+accuracy_cv
+which.max(accuracy_cv)
+max(accuracy_cv)
+
+acc_cv_plot <- data.frame(K=1:kmax, accuracies=accuracy_cv)
+ggplot(acc_cv_plot, aes(K, accuracies)) +
+  geom_point()
+
+```
+
+The K-fold cross validation divides the data in k subsets. In this `model_cv` we are dividing our data `df` into 10 folds, and testing values of k from 1-25. We observe that when `k = 14` our accuracy is the highest at 0.855. 
+
+```{r loocv_cv_plot}
+
+
+ggplot() +
+  geom_line(aes(x=1:kmax, y=accuracy, color="LOOCV")) +
+  geom_line(aes(x=1:kmax, y=accuracy_cv, color="K-fold CV")) +
+  labs(x ="k", y ="Accuracies", color="Method")
+
+```
+
+Two major advantages of the LOOCV method, is that 1) It has less bias than the standard train, validate, test method and k-fold CV method. To understand this, we are training our model on n - 1 data points, in contrast to the standard method where we use only 50% - 80% of our data. When we use k-fold, there will be more variability (not variance) due to how the data is split (although not as much variability as the standard split). 2) Randomness does not affect LOOCV like it does with the other methods, since randomness could be generated from the split data. (James et al., 2021, p. 201-203). 
+
+A major disadvantage is the computational cost of LOOCV. If we are working with a very large n, our `model` can take an extremely long time to fit. Additionally, there is also a high variance with LOOCV since the outputs are highly correlated with each other; the model is trained on almost the same data n times. (James et al., 2021, p. 204)
+
+From the plot above, you can see how the variability and randomness from splitting the data affects the accuracy of the k-fold method, while the accuracy is a bit more stable across k (nearest neighbor) for LOOCV.
+
+**(b) splitting the data into training, validation, and test data sets (pick either KNN or SVM; the other is optional)**
+
+```{r split_data}
+
+n <- nrow(df)
+
+# 70-15-15 split
+
+n_train <- floor(0.7 * n)
+n_validate <- floor(0.15 * n)
+
+train_sample <- sample(n, n_train)
+data_train <- df[train_sample,]
+
+df_vt <- df[-train_sample, ]
+
+val_sample <- sample(nrow(df_vt), n_validate)
+data_validate <- df_vt[val_sample,]
+data_test <- df_vt[-val_sample,]
+
+accuracy_val <- rep(0, 25)
+
+for (k in 1:kmax) {
+  
+  model_knn <- kknn(V11~., data_train, data_validate,
+                    k=k, scale=TRUE)
+  
+  pred <- as.integer(fitted(model_knn) + 0.5)
+  accuracy_val[k] <- sum(pred == data_validate$V11) / nrow(data_validate)
+  
+}
+
+accuracy_val
+# Find best value of k
+best_k <- which.max(accuracy_val)
+best_k
+accuracy_val[best_k]
+
+# Evaluate on test data
+model_knn_test <- kknn(V11~., data_train, data_test,
+                  k=best_k, scale=TRUE)
+
+pred <- as.integer(fitted(model_knn_test) + 0.5)
+accuracy_test <- sum(pred == data_test$V11) / nrow(data_test)
+
+accuracy_test
+
+```
+
+
+From our training and validation sets, we observe that when `k = 5` our accuracy is the highest on the validation sets `0.867`. We then apply that model to the test set, and find that the accuracy is `0.818`.
+
+One possible reason why the validation set has a higher accuracy than the test set is that there might be an above-average random effects that make the chosen model more optimistic. It could also be that we found the best k value using the validation data, and that k value might not be the most optimal for the test data. A third reason, could be the size of data and overfitting with the validation set. 15% data might not be enough to create a quality model. We will try and increase the data points for the validation and test splits.
+
+```{r larger split}
+rm(list = ls())
+df <- read.table("credit_card_data.txt")
+set.seed(7)
+n <- nrow(df)
+
+kmax <- 25
+
+# 60-20-20 split
+
+n_train <- floor(0.6 * n)
+n_validate <- floor(0.2 * n)
+
+train_sample <- sample(n, n_train)
+data_train <- df[train_sample,]
+
+df_vt <- df[-train_sample, ]
+
+val_sample <- sample(nrow(df_vt), n_validate)
+data_validate <- df_vt[val_sample,]
+data_test <- df_vt[-val_sample,]
+
+accuracy_val <- rep(0, 25)
+
+for (k in 1:kmax) {
+  
+  model_knn <- kknn(V11~., data_train, data_validate,
+                    k=k, scale=TRUE)
+  
+  pred <- as.integer(fitted(model_knn) + 0.5)
+  accuracy_val[k] <- sum(pred == data_validate$V11) / nrow(data_validate)
+  
+}
+
+accuracy_val
+# Find best value of k
+best_k <- which.max(accuracy_val)
+best_k
+accuracy_val[best_k]
+
+# Evaluate on test data
+model_knn_test <- kknn(V11~., data_train, data_test,
+                  k=best_k, scale=TRUE)
+
+pred <- as.integer(fitted(model_knn_test) + 0.5)
+accuracy_test <- sum(pred == data_test$V11) / nrow(data_test)
+
+accuracy_test
+
+```
+
+Now, we observe that accuracy is higher on the test data, rather than the validation. So how should we pick the classifier? In this case, I chose to go with `k = 14` rather than `k = 5`, since there is more data on both the validation set and test set. With more data in these splits, the model could generalize better and less likely to overfit, although in this case, it might not be a significant difference.
+
+#### **Question 4.1**
+
+**Describe a situation or problem from your job, everyday life, current events, etc., for which a clustering model would be appropriate. List some (up to 5) predictors that you might use.**
+
+A problem I run into is when I'm studying or working, I'll listen to a study piano playlist on my Spotify. However, when I'm not doing anything mentally taxing, I prefer to listen to anything but piano/classical/lofi. Spotify doesn't recognize the difference, and tends to recommend a playlist that merges everything together i.e. 2023 Most Played.
+
+A clustering model for recommending music would be appropriate. The predictors would be, time of day when listening, genre, listening history, Favorited/skipped track, and lyrics.
+
+<br>
+
+#### **Question 4.2**
+
+**The iris data set iris.txt contains 150 data points, each with four predictor variables and one categorical response. The predictors are the width and length of the sepal and petal of flowers and the response is the type of flower. The response values are only given to see how well a specific method performed and should not be used to build the model. Use the R function kmeans to cluster the points as well as possible. Report the best combination of predictors, your suggested value of k, and how well your best clustering predicts flower type.**
+
+```{r irisinit, message=FALSE}
+rm(list = ls())
+library(ggplot2)
+set.seed(7)
+data <- read.table("iris.txt", header=TRUE)
+head(data)
+table(data$Species)
+```
+
+
+```{r unscaled_plot}
+kmax <- 7
+dist_wss = rep(0, kmax)
+
+# (Raut, 2019, p. Finding Optimal Cluster Using Elbow Method)
+for(k in 1:kmax) {
+  
+  clusters <- kmeans(data[,1:4], centers=k, nstart=15)
+  dist_wss[k] <- clusters$tot.withinss
+  print(table(clusters$cluster, data$Species))
+}
+
+elbow_plot <- data.frame(k=1:kmax, distance=dist_wss)
+ggplot(elbow_plot, aes(k, distance)) +
+  geom_point() +
+  geom_line() +
+  labs(x="Number of Clusters", y="Distance (Total Within Sum of Squares)") +
+  scale_x_continuous(breaks=1:10, labels=1:10)
+
+```
+
+We observe from the elbow plot that when k = 3, the distance between the cluster center and point begins tapering off. An increase in the number cluster doesn't show a big decrease in distance from the center of the cluster. When \(k \in \{2, 3, 4, 5\}\), the Setosa species is perfectly clustered. Although \(k = 3\) does a decent job of clustering Versicolor and Virginica, but when \(k \in \{4, 5\}\) the clusters do a better job at distinguishing the differences. Let's see how scaled data affects the clusters. 
+
+
+```{r scaled_data}
+data_scaled <- scale(data[,1:4], center=TRUE, scale=TRUE)
+data_scaled <- as.data.frame(data_scaled)
+data_scaled["Species"] <- data[,5]
+```
+
+```{r scaled_plot}
+kmax <- 7
+dist_wss_sc = rep(0, kmax)
+
+for(k in 1:kmax) {
+  
+  clusters_sc <- kmeans(data_scaled[,1:4], centers=k, nstart=15)
+  dist_wss_sc[k] <- clusters_sc$tot.withinss
+  print(table(clusters_sc$cluster, data$Species))
+  
+}
+
+elbow_plot_scaled <- data.frame(k=1:kmax, distance=dist_wss_sc)
+ggplot(elbow_plot_scaled, aes(k, distance)) +
+  geom_point() +
+  geom_line() +
+  labs(x="Number of Clusters", y="Distance (Total Within Sum of Squares)") +
+  scale_x_continuous(breaks=1:7, labels=1:7)
+```
+
+
+For the scaled data, we observe a similar pattern. However, when \(k = 4\), the Setosa clusters begins to split, where the unscaled data began at \(k = 6\). From the elbow plot, I would suggest \(k = 3\) since this is a good balance between minimizing the distance between the cluster center and the data points and properly clustering the flower species to its respective cluster.
+
+![Sepal and Petal](sepal_petal.jpg)
+<br>
+
+Visually, we observe that petal properties can be a stronger predictor than sepal properties. In the next experiment, we will use only Petal Width and Petal Height as predictors.
+
+
+```{r petal}
+dist_wss_p = rep(0, kmax)
+
+# (Raut, 2019, p. Finding Optimal Cluster Using Elbow Method)
+for(k in 1:kmax) {
+  
+  clusters_p <- kmeans(data[,3:4], centers=k, nstart=15)
+  dist_wss_p[k] <- clusters_p$tot.withinss
+  print(table(clusters_p$cluster, data$Species))
+}
+
+elbow_plot_p <- data.frame(k=1:kmax, distance=dist_wss_p)
+ggplot(elbow_plot, aes(k, distance)) +
+  geom_point() +
+  geom_line() +
+  labs(x="Number of Clusters", y="Distance (Total Within Sum of Squares)") +
+  scale_x_continuous(breaks=1:7, labels=1:7)
+
+```
+
+```{r scaled_petal}
+
+dist_wss_sc_p = rep(0, kmax)
+
+# (Raut, 2019, p. Finding Optimal Cluster Using Elbow Method)
+for(k in 1:kmax) {
+  
+  clusters_sc_p <- kmeans(data_scaled[,3:4], centers=k, nstart=15)
+  dist_wss_sc_p[k] <- clusters_sc_p$tot.withinss
+  print(table(clusters_sc_p$cluster, data$Species))
+}
+
+elbow_plot_sc_p <- data.frame(k=1:kmax, distance=dist_wss_sc_p)
+ggplot(elbow_plot_sc_p, aes(k, distance)) +
+  geom_point() +
+  geom_line() +
+  labs(x="Number of Clusters", y="Distance (Total Within Sum of Squares)") +
+  scale_x_continuous(breaks=1:7, labels=1:7)
+
+```
+```{r}
+print(dist_wss)
+print(dist_wss_sc)
+print(dist_wss_p)
+print(dist_wss_sc_p)
+```
+When looking at only petal width and petal height, we observe from the tables that these predictors do a better job in creating the correct clusters for the flower species.
+
+In conclusion, ***I recommend using \(k = 3\)*** since all the elbow plots show that once \(k > 3\), the difference in distance does not change significantly. Additionally, I would use ***scaled data of Pedal Width and Petal Height as predictors*** for this particular problem, since the distance within clusters is significantly smaller \(17.91\) than the other 3 experiments \(78.85, 138.89, 31.37\). 
+
+<br>
+<br>
+
+
+
+James, G., Witten, D., Hastie, T., & Tibshirani, R. (2021). An introduction to statistical learning: With applications in R (2nd ed., pp. 197–208). Springer.
+
+Raut, N. (2019). k-Means Clustering. RPubs. https://www.rpubs.com/neharaut05/k-Means 
+
+CC BY-SA 3.0, https://commons.wikimedia.org/w/index.php?curid=109679
